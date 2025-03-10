@@ -66,6 +66,10 @@ with tab1:
         include_audio = st.checkbox("Include audio in output", value=False)  # Default is now False
         output_format = st.selectbox("Output format", ["mp4", "gif"], index=0)
     
+    # Debug: show current state of scene gallery
+    if st.session_state.scene_gallery:
+        st.write(f"Debug: {len(st.session_state.scene_gallery)} scenes in gallery")
+    
     # Process button (only enabled if videos are uploaded and not currently processing)
     process_button = st.button("Process Videos", 
                               disabled=len(st.session_state.uploaded_videos) == 0 or st.session_state.processing,
@@ -74,6 +78,7 @@ with tab1:
     if process_button:
         st.session_state.processing = True
         st.session_state.scene_gallery = []  # Reset gallery when processing new videos
+        st.session_state.selected_scenes = []  # Reset selections
         
         # Create progress indicators
         progress_bar = st.progress(0)
@@ -90,7 +95,7 @@ with tab1:
         # Process each video
         for video_idx, video_file in enumerate(st.session_state.uploaded_videos):
             # Calculate base progress percentage for this video (0-1 scale)
-            video_progress_base = video_idx / total_videos
+            video_progress_base = video_idx / total_videos if total_videos > 0 else 0
             status_text.text(f"Processing video {video_idx+1}/{total_videos}: {video_file.name}")
             
             # Save file temporarily
@@ -101,141 +106,12 @@ with tab1:
             try:
                 # Detect scenes
                 status_text.text(f"Detecting scenes in {video_file.name}...")
-                progress_bar.progress(video_progress_base + 0.05/total_videos)  # Small increment
+                progress_bar.progress(video_progress_base + 0.05/total_videos if total_videos > 0 else 0.05)
                 
                 scenes = detect(temp_file_path, ContentDetector(threshold=threshold))
                 
                 if not scenes:
                     st.warning(f"No scene changes detected in {video_file.name}. Try lowering the threshold value.")
-                    progress_bar.progress(video_progress_base + 0.9/total_videos)  # Move almost to the next video
+                    progress_bar.progress(video_progress_base + 0.9/total_videos if total_videos > 0 else 0.9)
                 else:
-                    progress_bar.progress(video_progress_base + 0.1/total_videos)  # 10% progress for this video
-                    
-                    # Use ffmpeg to split video
-                    status_text.text(f"Splitting {video_file.name} into scenes...")
-                    video_scene_files = []
-                    base_name = os.path.splitext(os.path.basename(temp_file_path))[0]
-                    
-                    # Process each scene
-                    for idx, (start, end) in enumerate(scenes, start=1):
-                        # Calculate the progress within this video's portion
-                        scene_portion = 0.8 / total_videos  # 80% of this video's portion for scene processing
-                        scene_progress = (idx / len(scenes)) * scene_portion
-                        current_progress = min(video_progress_base + 0.1/total_videos + scene_progress, 1.0)
-                        progress_bar.progress(current_progress)
-                        
-                        # Prepare output filename - sanitize base_name to remove problematic characters
-                        safe_base_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in base_name)
-                        if output_format == "gif":
-                            output_file = os.path.join(output_dir, f"{safe_base_name}_scene{idx}.gif")
-                        else:
-                            output_file = os.path.join(output_dir, f"{safe_base_name}_scene{idx}.mp4")
-                        
-                        # Prepare ffmpeg command
-                        command = [
-                            "ffmpeg",
-                            "-i", temp_file_path,
-                            "-ss", str(start.get_seconds()),
-                            "-t", str(end.get_seconds() - start.get_seconds()),
-                        ]
-                        
-                        if output_format == "mp4":
-                            command += [
-                                "-preset", "fast",
-                                "-c:v", "libx264",
-                                "-crf", "23",
-                            ]
-                            if include_audio:
-                                command += ["-c:a", "aac"]
-                            else:
-                                command += ["-an"]
-                        else:  # GIF
-                            command += [
-                                "-vf", "fps=10,scale=480:-1:flags=lanczos",
-                                "-loop", "0",
-                                "-c:v", "gif"
-                            ]
-                        
-                        # Extract a thumbnail for the gallery
-                        thumbnail_file = os.path.join(output_dir, f"{safe_base_name}_scene{idx}_thumb.jpg")
-                        thumb_cmd = [
-                            "ffmpeg",
-                            "-i", temp_file_path,
-                            "-ss", str(start.get_seconds() + (end.get_seconds() - start.get_seconds()) / 2),  # Middle of scene
-                            "-vframes", "1",  # Extract one frame
-                            "-q:v", "2",  # High quality
-                            "-y", thumbnail_file
-                        ]
-                        
-                        command += ["-y", output_file]
-                        
-                        try:
-                            # Process scene
-                            subprocess.run(command, check=True, capture_output=True)
-                            
-                            # Generate thumbnail
-                            subprocess.run(thumb_cmd, check=True, capture_output=True)
-                            
-                            # Verify the output file exists and has content
-                            if os.path.exists(output_file) and os.path.getsize(output_file) > 10000:
-                                video_scene_files.append(output_file)
-                                all_scene_files.append(output_file)
-                                
-                                # Add to gallery data
-                                with open(output_file, "rb") as f:
-                                    video_bytes = f.read()
-                                
-                                with open(thumbnail_file, "rb") as f:
-                                    thumbnail_bytes = f.read()
-                                
-                                st.session_state.scene_gallery.append({
-                                    "source_video": video_file.name,
-                                    "scene_number": idx,
-                                    "scene_data": video_bytes,
-                                    "thumbnail": thumbnail_bytes,
-                                    "start_time": str(start),
-                                    "end_time": str(end),
-                                    "duration": end.get_seconds() - start.get_seconds(),
-                                    "format": output_format
-                                })
-                                
-                                status_text.text(f"Processed scene {idx} of {len(scenes)} for {video_file.name}")
-                            else:
-                                st.warning(f"Scene {idx} of {video_file.name} may not have processed correctly.")
-                        except subprocess.CalledProcessError as e:
-                            st.error(f"Error processing scene {idx} of {video_file.name}: {str(e)}")
-                    
-                    # Update progress to the end of this video's portion
-                    progress_bar.progress(min((video_idx + 1) / total_videos, 1.0))
-                    
-                    # Display summary for this video
-                    st.info(f"Successfully processed {len(video_scene_files)} out of {len(scenes)} scenes from {video_file.name}")
-            
-            except Exception as e:
-                st.error(f"Error processing {video_file.name}: {str(e)}")
-        
-        # Complete progress
-        progress_bar.progress(1.0)
-        status_text.text("Processing complete!")
-        
-        # Create a ZIP with all scenes from all videos
-        if all_scene_files:
-            st.success(f"Successfully processed {len(all_scene_files)} scenes from {total_videos} videos")
-            
-            # Create ZIP file
-            zip_buffer = BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-                for scene_path in all_scene_files:
-                    zip_file.write(scene_path, os.path.basename(scene_path))
-            
-            # Provide download button for ZIP
-            zip_size = len(zip_buffer.getvalue()) / (1024*1024)  # Size in MB
-            st.download_button(
-                label=f"Download All Scenes as ZIP ({zip_size:.1f} MB)",
-                data=zip_buffer.getvalue(),
-                file_name=f"all_scenes_{uuid.uuid4().hex[:8]}.zip",
-                mime="application/zip",
-                key="download_all"
-            )
-            
-            st.success("View all processed scenes in the Gallery tab")
+                    progress_bar.progress(video_progress_base + 0.1/total_videos
