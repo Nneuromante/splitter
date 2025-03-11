@@ -296,55 +296,69 @@ with tab2:
                     mime="application/zip",
                     key="download_selected"
                 )
+                
+            # Add clear selection button
+            if st.button("Clear Selection"):
+                st.session_state.selected_scenes = []
+                st.rerun()
         
-        # Display each scene in a simple row format (image - text - actions)
-        for i, scene in enumerate(filtered_scenes):
-            scene_idx = st.session_state.scene_gallery.index(scene)
-            scene_file_name = f"{scene['source_video'].split('.')[0]}_scene{scene['scene_number']}.{scene['format']}"
+        # Display scenes in a grid layout (3 columns)
+        num_cols = 3
+        
+        # Create rows of scenes
+        for i in range(0, len(filtered_scenes), num_cols):
+            # Create columns for this row
+            cols = st.columns(num_cols)
             
-            # Create a row with 3 columns
-            col1, col2, col3 = st.columns([2, 6, 1])
-            
-            # Column 1: Thumbnail image
-            with col1:
-                st.image(scene["thumbnail"], use_container_width=True)
-            
-            # Column 2: File name and duration
-            with col2:
-                st.markdown(f"**{scene_file_name}** // **{scene['duration']:.2f}s**")
+            # Add scenes to columns
+            for col_idx in range(num_cols):
+                scene_idx = i + col_idx
                 
-                # You can add a hidden expander for preview here if needed
-                with st.expander("Preview", expanded=False):
-                    if scene["format"] == "mp4":
-                        st.video(scene["scene_data"])
-                    else:
-                        st.image(scene["scene_data"])
-            
-            # Column 3: Selection checkbox and download button
-            with col3:
-                # Create a container for the actions
-                action_container = st.container()
-                
-                # Selection checkbox
-                is_selected = scene_idx in st.session_state.selected_scenes
-                if action_container.checkbox("", value=is_selected, key=f"select_{scene_idx}"):
-                    if scene_idx not in st.session_state.selected_scenes:
-                        st.session_state.selected_scenes.append(scene_idx)
-                else:
-                    if scene_idx in st.session_state.selected_scenes:
-                        st.session_state.selected_scenes.remove(scene_idx)
-                
-                # Download button
-                action_container.download_button(
-                    "↓",
-                    data=scene["scene_data"],
-                    file_name=scene_file_name,
-                    mime=f"video/{scene['format']}" if scene['format'] == "mp4" else "image/gif",
-                    key=f"download_single_{scene_idx}"
-                )
-            
-            # Add a separator
-            st.markdown("---")
+                # Check if we still have scenes to display
+                if scene_idx < len(filtered_scenes):
+                    scene = filtered_scenes[scene_idx]
+                    original_idx = st.session_state.scene_gallery.index(scene)
+                    
+                    with cols[col_idx]:
+                        # Display thumbnail
+                        st.image(scene["thumbnail"], use_container_width=True)
+                        
+                        # Display file name and duration
+                        scene_file_name = f"{scene['source_video'].split('.')[0]}_scene{scene['scene_number']}.{scene['format']}"
+                        st.markdown(f"**{scene_file_name}** // **{scene['duration']:.2f}s**")
+                        
+                        # Controls row
+                        control_cols = st.columns([1, 1])
+                        
+                        with control_cols[0]:
+                            # Selection checkbox
+                            is_selected = original_idx in st.session_state.selected_scenes
+                            if st.checkbox("Select", value=is_selected, key=f"select_{original_idx}"):
+                                if original_idx not in st.session_state.selected_scenes:
+                                    st.session_state.selected_scenes.append(original_idx)
+                            else:
+                                if original_idx in st.session_state.selected_scenes:
+                                    st.session_state.selected_scenes.remove(original_idx)
+                        
+                        with control_cols[1]:
+                            # Download button
+                            st.download_button(
+                                "Download",
+                                data=scene["scene_data"],
+                                file_name=scene_file_name,
+                                mime=f"video/{scene['format']}" if scene['format'] == "mp4" else "image/gif",
+                                key=f"download_single_{original_idx}"
+                            )
+                        
+                        # Preview button
+                        if st.button("Preview", key=f"preview_{original_idx}"):
+                            if scene["format"] == "mp4":
+                                st.video(scene["scene_data"])
+                            else:
+                                st.image(scene["scene_data"])
+                        
+                        # Add some spacing
+                        st.write("")
         
         # Show info about total scenes
         st.caption(f"Showing {len(filtered_scenes)} scenes out of {len(st.session_state.scene_gallery)} total")
