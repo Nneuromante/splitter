@@ -307,7 +307,7 @@ with tab2:
             
             # Column 1: Thumbnail image
             with col1:
-                st.image(scene["thumbnail"], use_column_width=True)
+                st.image(scene["thumbnail"], use_container_width=True)
             
             # Column 2: File name and duration
             with col2:
